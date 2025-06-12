@@ -1,146 +1,103 @@
-# Ask-MCP
+# 🎯 Ask-MCP - AI交互式问答工具
 
-一个允许AI在对话中动态询问用户问题的MCP工具。
+<div align="center">
 
-## 特点
+![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
+![MCP](https://img.shields.io/badge/MCP-Compatible-orange.svg)
+![PyQt5](https://img.shields.io/badge/GUI-PyQt5-red.svg)
 
-- **简洁高效** - 基于FastMCP框架，代码简洁易维护
-- **交互友好** - 图形界面弹窗，支持问答题和选择题
-- **灵活扩展** - 自动添加"其他"选项，支持自定义输入
-- **现代化设计** - macOS风格界面，支持异步处理
+**一个允许AI在对话中动态询问用户问题的现代化MCP工具**
 
-## 功能特性
+</div>
 
-- 支持AI发送XML格式的问题给用户
-- 支持问答题和选择题两种问题类型
-- 弹出图形界面窗口供用户回答
-- 用户回答后立即返回给AI继续对话
-- 异步处理，不阻塞对话流程
+---
 
-## 安装
+## 📋 项目简介
 
+Ask-MCP 是一个基于 Model Context Protocol (MCP) 的交互式问答工具，它允许AI助手在对话过程中通过美观的图形界面向用户提出问题并获取回答。
+
+## 🚀 快速开始
+
+### 1. 下载项目
 ```bash
-pip install -r requirements.txt
+# 从GitHub下载项目
+git clone https://github.com/your-username/ask-mcp.git
+cd ask-mcp
 ```
 
-## 快速开始
-
-### 1. 安装依赖
+### 2. 运行安装脚本
 ```bash
-pip install -r requirements.txt
+# Windows用户直接双击运行
+第一次使用时运行.bat
 ```
 
-### 2. 测试组件
+### 3. 配置MCP服务器
+
+安装脚本会生成 `mcp.json` 配置文件，将其内容合并到以下位置：
+
+**Cursor IDE:**
+- 配置文件位置: `%APPDATA%\Cursor\User\globalStorage\cursor.workbench\mcp.json`
+
+**Claude Desktop:**
+- 配置文件位置: `%APPDATA%\Claude\claude_desktop_config.json`
+
+将生成的配置内容添加到现有的 `mcpServers` 部分即可。
+
+### 4. 测试界面
 ```bash
-# 运行组件测试
-python test.py
+# 测试现代化UI界面
+python testUI.py
 ```
 
-### 3. 开发测试
-```bash
-# 使用MCP Inspector进行开发测试
-fastmcp dev fastmcp_server.py
-```
+## 📖 使用示例
 
-### 4. 安装到Claude Desktop
-```bash
-# 自动安装到Claude Desktop
-fastmcp install fastmcp_server.py
-```
+### AI使用方式
 
-### 5. 验证安装
-重启Claude Desktop，你应该能看到"YuoMCP Interactive Query Tool"已经可用。
+AI可以通过调用 `ask_user_question` 工具来向用户提问：
 
-## 使用方法
-
-AI可以调用 `ask_user_question` 工具发送问题给用户：
-
-### 问答题示例
+#### 问答题示例
 ```xml
 <question type="qa">
-  <title>请输入你的想法</title>
-  <content>你对这个功能有什么建议？</content>
+  <title>项目反馈</title>
+  <content>请分享您对这个功能的使用体验</content>
 </question>
 ```
 
-### 选择题示例
+#### 选择题示例
 ```xml
 <question type="choice">
-  <title>选择你喜欢的颜色</title>
-  <content>请选择一个颜色：</content>
+  <title>技术偏好</title>
+  <content>请选择您偏好的编程语言：</content>
   <options>
-    <option value="red">红色</option>
-    <option value="blue">蓝色</option>
-    <option value="green">绿色</option>
+    <option value="python">Python</option>
+    <option value="javascript">JavaScript</option>
+    <option value="rust">Rust</option>
   </options>
 </question>
 ```
 
-## 安装配置
+## 🏗️ 项目结构
 
-### 自动配置到Cursor IDE
-
-**方法1：使用批处理脚本（推荐）**
-```bash
-# 双击运行或在命令行执行
-install_to_cursor.bat
+```
+ask-mcp/
+├── 📄 README.md                 # 项目说明文档
+├── 📄 requirements.txt          # Python依赖列表
+├── 🔧 第一次使用时运行.bat      # 一键安装脚本
+├── 🚀 fastmcp_server.py        # MCP服务器主程序
+├── 🎨 ui_handler.py            # 现代化UI界面处理
+├── 📝 question_parser.py       # XML问题解析器
+└── 🧪 testUI.py               # UI功能测试
 ```
 
-**方法2：使用Python脚本**
-```bash
-python install_to_cursor.py
-```
+## 📄 许可证
 
-这些脚本会自动：
-- 检测当前工具目录
-- 查找Cursor配置目录
-- 备份现有配置（如果存在）
-- 写入MCP服务器配置
-- 提供详细的安装反馈
+本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
 
-### 手动配置
-如果自动配置失败，可以手动编辑Cursor的MCP配置文件，添加：
-```json
-{
-  "mcpServers": {
-    "yuomcp-interactive": {
-      "command": "python",
-      "args": ["path/to/your/fastmcp_server.py"],
-      "env": {}
-    }
-  }
-}
-```
+---
 
-## 测试验证
+<div align="center">
 
-### UI功能测试
-```bash
-# 运行UI测试脚本，测试界面弹出和数据返回
-python testUI.py
-```
+**如果这个项目对您有帮助，请给我一个 ⭐ Star！**
 
-测试包括：
-- 问答题界面测试
-- 选择题界面测试
-- 复杂选择题测试
-- XML解析+UI完整流程测试
-- UI响应性测试
-
-### 组件测试
-```bash
-# 运行组件功能测试
-python test.py
-```
-
-## 项目结构
-
-- `fastmcp_server.py` - FastMCP服务器主文件
-- `ui_handler.py` - 图形界面处理模块  
-- `question_parser.py` - XML问题解析模块
-- `test.py` - 组件功能测试脚本
-- `testUI.py` - UI界面测试脚本
-- `install_to_cursor.bat` - Windows批处理安装脚本
-- `install_to_cursor.py` - Python安装配置脚本
-- `requirements.txt` - 项目依赖
-- `README.md` - 项目说明文档 
+</div> 

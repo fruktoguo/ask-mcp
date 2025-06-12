@@ -1,589 +1,655 @@
 """
-图形界面处理模块
-使用tkinter创建macOS风格的现代化弹出窗口供用户回答问题
+现代化图形界面处理模块
+使用PyQt5创建美观的现代化弹出窗口供用户回答问题
+支持自适应分辨率、圆角阴影、渐变背景和流畅动效
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox
-import threading
-import asyncio
-from typing import Optional, Any
+import sys
+from typing import Optional
+from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
+                           QLabel, QPushButton, QTextEdit, QRadioButton, 
+                           QLineEdit, QButtonGroup, QFrame, QScrollArea, QGraphicsDropShadowEffect)
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QSize
+from PyQt5.QtGui import QFont, QPalette, QColor, QLinearGradient, QPainter, QPen, QBrush, QPixmap
 from question_parser import ParsedQuestion, QuestionOption
 
 
-class MacOSQuestionDialog:
-    """macOS风格现代化问题对话框类"""
+class ModernQuestionDialog(QWidget):
+    """现代化的问题对话框，支持自适应分辨率和美观效果"""
     
-    # macOS风格配色方案
-    COLORS = {
-        'bg': '#F5F5F7',           # macOS浅灰背景
-        'card_bg': '#FFFFFF',      # 纯白卡片背景
-        'primary': '#007AFF',      # iOS蓝色
-        'primary_hover': '#0051D5', # 蓝色悬停
-        'secondary': '#8E8E93',    # 系统灰色
-        'text': '#1D1D1F',         # 主文本颜色
-        'text_secondary': '#86868B', # 次要文本
-        'border': '#D2D2D7',       # 边框颜色
-        'success': '#30D158',      # 系统绿色
-        'warning': '#FF9F0A',      # 系统橙色
-        'danger': '#FF3B30',       # 系统红色
-        'shadow': '#00000010',     # 阴影颜色
-    }
+    finished = pyqtSignal(object)
     
     def __init__(self, question: ParsedQuestion):
+        super().__init__()
         self.question = question
         self.result = None
-        self.root = None
-        self.completed = threading.Event()
-        self.choice_var = None
-        self.custom_entry = None
-        self.text_widget = None
+        self.choice_group = None
+        self.custom_input = None
+        self.text_input = None
+        self.error_label = None
+        self.animation = None
         
-    def show_dialog(self) -> Optional[str]:
-        """
-        显示macOS风格对话框并等待用户回答
+        # 获取屏幕信息以适应分辨率
+        self.screen = QApplication.desktop().screenGeometry()
+        self.scale_factor = self.get_scale_factor()
         
-        Returns:
-            Optional[str]: 用户的回答，如果取消则返回None
-        """
-        # 创建主窗口
-        self.root = tk.Tk()
-        self.root.title("")  # 移除标题栏文字
-        self.root.configure(bg=self.COLORS['bg'])
+        self.init_ui()
+        self.setup_animations()
         
-        # 设置窗口样式
-        self._setup_macos_window()
+    def get_scale_factor(self):
+        """根据屏幕分辨率计算缩放因子"""
+        base_width = 1920
+        base_height = 1080
         
-        # 创建macOS风格界面
-        self._create_macos_widgets()
+        # 计算基于宽度和高度的缩放因子
+        width_scale = self.screen.width() / base_width
+        height_scale = self.screen.height() / base_height
         
-        # 绑定事件
-        self._bind_events()
+        # 使用较小的缩放因子，确保界面不会过大
+        scale = min(width_scale, height_scale)
         
-        # 运行GUI主循环
-        self.root.mainloop()
+        # 限制缩放范围在0.7到1.5之间
+        return max(0.7, min(1.5, scale))
         
-        return self.result
-    
-    def _setup_macos_window(self):
-        """设置macOS风格窗口"""
-        # 设置窗口大小
+    def scaled(self, value):
+        """根据缩放因子调整数值"""
+        return int(value * self.scale_factor)
+        
+    def init_ui(self):
+        """初始化现代化界面"""
+        # 设置窗口属性
+        self.setWindowTitle("询问问题")
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        
+        # 根据内容类型和缩放因子设置窗口大小
         if self.question.question_type == 'choice':
-            self.root.geometry("520x580")
+            width = self.scaled(600)
+            height = self.scaled(500)
         else:
-            self.root.geometry("520x480")
-        
-        self.root.resizable(False, False)  # macOS对话框通常不可调整大小
+            width = self.scaled(550)
+            height = self.scaled(400)
+            
+        self.setFixedSize(width, height)
         
         # 居中显示
-        self._center_window()
+        self.center_window()
         
-        # 设置窗口属性
-        self.root.attributes('-topmost', True)
-        self.root.focus_force()
+        # 创建主容器
+        self.setup_main_container()
         
-        # 尝试设置macOS样式（如果支持）
-        try:
-            # 移除标题栏装饰
-            self.root.overrideredirect(False)
-            # 设置窗口样式
-            self.root.configure(relief='flat', bd=0)
-        except:
-            pass
-    
-    def _center_window(self):
-        """将窗口居中显示"""
-        self.root.update_idletasks()
-        width = self.root.winfo_reqwidth()
-        height = self.root.winfo_reqheight()
-        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.root.winfo_screenheight() // 2) - (height // 2)
-        self.root.geometry(f"+{x}+{y}")
-    
-    def _create_macos_widgets(self):
-        """创建macOS风格界面组件"""
-        # 主容器（带圆角效果的模拟）
-        main_container = tk.Frame(self.root, bg=self.COLORS['bg'])
-        main_container.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
+        # 创建布局
+        self.setup_layout()
         
-        # 内容卡片（模拟圆角和阴影）
-        content_card = tk.Frame(
-            main_container, 
-            bg=self.COLORS['card_bg'],
-            relief='flat',
-            bd=0
-        )
-        content_card.pack(fill=tk.BOTH, expand=True)
+        # 设置样式
+        self.setup_styles()
         
-        # 添加视觉边框效果
-        border_frame = tk.Frame(
-            content_card,
-            bg=self.COLORS['border'],
-            height=1
-        )
-        border_frame.pack(fill=tk.X, side=tk.TOP)
+        # 添加阴影效果
+        self.add_shadow_effect()
         
-        # 内容区域
-        content_area = tk.Frame(content_card, bg=self.COLORS['card_bg'])
-        content_area.pack(fill=tk.BOTH, expand=True, padx=24, pady=24)
+    def center_window(self):
+        """窗口居中"""
+        x = (self.screen.width() - self.width()) // 2
+        y = (self.screen.height() - self.height()) // 2
+        self.move(x, y)
         
-        # 标题区域
-        self._create_macos_title_section(content_area)
+    def setup_main_container(self):
+        """设置主容器"""
+        self.main_container = QFrame(self)
+        self.main_container.setGeometry(0, 0, self.width(), self.height())
+        self.main_container.setObjectName("mainContainer")
         
-        # 内容区域
-        self._create_macos_content_section(content_area)
+    def setup_layout(self):
+        """设置现代化布局"""
+        main_layout = QVBoxLayout(self.main_container)
+        main_layout.setSpacing(self.scaled(20))
+        main_layout.setContentsMargins(self.scaled(30), self.scaled(30), self.scaled(30), self.scaled(30))
+        
+        # 创建标题区域
+        self.create_header(main_layout)
+        
+        # 错误信息标签
+        self.error_label = QLabel("")
+        self.error_label.setObjectName("errorLabel")
+        self.error_label.setVisible(False)
+        main_layout.addWidget(self.error_label)
         
         # 输入区域
         if self.question.question_type == 'qa':
-            self._create_macos_qa_section(content_area)
+            self.create_text_input(main_layout)
         elif self.question.question_type == 'choice':
-            self._create_macos_choice_section(content_area)
+            self.create_choice_input(main_layout)
         
         # 按钮区域
-        self._create_macos_button_section(content_area)
-    
-    def _create_macos_title_section(self, parent):
-        """创建macOS风格标题区域"""
-        title_frame = tk.Frame(parent, bg=self.COLORS['card_bg'])
-        title_frame.pack(fill=tk.X, pady=(0, 16))
+        self.create_buttons(main_layout)
         
-        title_label = tk.Label(
-            title_frame,
-            text=self.question.title,
-            font=('SF Pro Display', 20, 'bold'),  # macOS系统字体
-            fg=self.COLORS['text'],
-            bg=self.COLORS['card_bg'],
-            wraplength=450,
-            justify=tk.CENTER
-        )
-        title_label.pack()
-    
-    def _create_macos_content_section(self, parent):
-        """创建macOS风格内容区域"""
+    def create_header(self, layout):
+        """创建现代化头部区域"""
+        header_frame = QFrame()
+        header_frame.setObjectName("headerFrame")
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setSpacing(self.scaled(12))
+        
+        # 标题
+        title_label = QLabel(self.question.title)
+        title_label.setObjectName("titleLabel")
+        title_label.setWordWrap(True)
+        title_label.setAlignment(Qt.AlignCenter)
+        header_layout.addWidget(title_label)
+        
+        # 内容描述
         if self.question.content:
-            content_frame = tk.Frame(parent, bg=self.COLORS['card_bg'])
-            content_frame.pack(fill=tk.X, pady=(0, 24))
+            content_label = QLabel(self.question.content)
+            content_label.setObjectName("contentLabel")
+            content_label.setWordWrap(True)
+            content_label.setAlignment(Qt.AlignCenter)
+            header_layout.addWidget(content_label)
             
-            content_label = tk.Label(
-                content_frame,
-                text=self.question.content,
-                font=('SF Pro Text', 14),
-                fg=self.COLORS['text_secondary'],
-                bg=self.COLORS['card_bg'],
-                wraplength=450,
-                justify=tk.CENTER
-            )
-            content_label.pack()
-    
-    def _create_macos_qa_section(self, parent):
-        """创建macOS风格问答题输入区域"""
-        qa_frame = tk.Frame(parent, bg=self.COLORS['card_bg'])
-        qa_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 24))
+        layout.addWidget(header_frame)
         
-        # 文本输入框容器（模拟macOS圆角输入框）
-        text_container = tk.Frame(
-            qa_frame, 
-            bg=self.COLORS['bg'], 
-            relief='solid', 
-            bd=1,
-            highlightbackground=self.COLORS['border'],
-            highlightthickness=1
-        )
-        text_container.pack(fill=tk.BOTH, expand=True)
+    def create_text_input(self, layout):
+        """创建现代化文本输入区域"""
+        input_frame = QFrame()
+        input_frame.setObjectName("inputFrame")
+        input_layout = QVBoxLayout(input_frame)
+        input_layout.setContentsMargins(0, 0, 0, 0)
         
-        # 文本输入框
-        self.text_widget = tk.Text(
-            text_container,
-            font=('SF Pro Text', 14),
-            bg=self.COLORS['card_bg'],
-            fg=self.COLORS['text'],
-            relief='flat',
-            bd=12,
-            wrap=tk.WORD,
-            selectbackground=self.COLORS['primary'],
-            selectforeground='white',
-            insertbackground=self.COLORS['primary'],
-            insertwidth=2
-        )
-        self.text_widget.pack(fill=tk.BOTH, expand=True)
+        self.text_input = QTextEdit()
+        self.text_input.setObjectName("modernTextEdit")
+        self.text_input.setPlaceholderText("💭 请在此输入您的回答...")
+        self.text_input.setMaximumHeight(self.scaled(150))
+        self.text_input.setAcceptRichText(False)
         
-        # 焦点效果
-        def on_focus_in(event):
-            text_container.configure(highlightbackground=self.COLORS['primary'])
+        input_layout.addWidget(self.text_input)
+        layout.addWidget(input_frame)
         
-        def on_focus_out(event):
-            text_container.configure(highlightbackground=self.COLORS['border'])
+        # 聚焦到文本输入框
+        self.text_input.setFocus()
         
-        self.text_widget.bind('<FocusIn>', on_focus_in)
-        self.text_widget.bind('<FocusOut>', on_focus_out)
-        self.text_widget.focus_set()
-    
-    def _create_macos_choice_section(self, parent):
-        """创建macOS风格选择题区域"""
-        choice_frame = tk.Frame(parent, bg=self.COLORS['card_bg'])
-        choice_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 24))
+    def create_choice_input(self, layout):
+        """创建现代化选择题输入区域"""
+        self.choice_group = QButtonGroup()
         
-        # 选项容器
-        options_container = tk.Frame(choice_frame, bg=self.COLORS['card_bg'])
-        options_container.pack(fill=tk.X)
+        # 创建滚动区域
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("modernScrollArea")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMaximumHeight(self.scaled(250))
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         
-        # 单选按钮变量
-        self.choice_var = tk.StringVar()
+        scroll_widget = QWidget()
+        scroll_widget.setObjectName("scrollWidget")
+        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setSpacing(self.scaled(8))
         
-        # 创建原有选项
+        # 添加预设选项
         for i, option in enumerate(self.question.options):
-            self._create_macos_option_button(options_container, option.text, option.value, i)
+            option_frame = QFrame()
+            option_frame.setObjectName("optionFrame")
+            option_layout = QHBoxLayout(option_frame)
+            option_layout.setContentsMargins(self.scaled(15), self.scaled(8), self.scaled(15), self.scaled(8))
+            
+            radio = QRadioButton(option.text)
+            radio.setObjectName("modernRadio")
+            radio.setAttribute(Qt.WA_Hover, True)
+            
+            # 添加emoji图标
+            emoji_icons = ["🔹", "🔸", "⭐", "🎯", "🌟", "💎", "🎪", "🎨", "🎭", "🎪"]
+            if i < len(emoji_icons):
+                radio.setText(f"{emoji_icons[i]} {option.text}")
+            
+            self.choice_group.addButton(radio, i)
+            option_layout.addWidget(radio)
+            scroll_layout.addWidget(option_frame)
+            
+            # 默认选择第一个
+            if i == 0:
+                radio.setChecked(True)
         
-        # 自动添加"其他"选项
-        other_index = len(self.question.options)
-        self._create_macos_other_option(options_container, other_index)
+        # 添加"其他"选项
+        other_frame = QFrame()
+        other_frame.setObjectName("otherFrame")
+        other_layout = QVBoxLayout(other_frame)
+        other_layout.setContentsMargins(self.scaled(15), self.scaled(8), self.scaled(15), self.scaled(8))
+        other_layout.setSpacing(self.scaled(8))
         
-        # 默认选择第一个选项
-        if self.question.options:
-            self.choice_var.set(self.question.options[0].value)
-    
-    def _create_macos_option_button(self, parent, text, value, index):
-        """创建macOS风格选项按钮"""
-        # 选项容器（模拟macOS列表项）
-        option_container = tk.Frame(
-            parent, 
-            bg=self.COLORS['card_bg'],
-            relief='flat',
-            bd=0
-        )
-        option_container.pack(fill=tk.X, pady=2)
+        other_radio = QRadioButton("✨ 其他")
+        other_radio.setObjectName("modernRadio")
+        other_radio.setAttribute(Qt.WA_Hover, True)
+        self.choice_group.addButton(other_radio, len(self.question.options))
+        other_layout.addWidget(other_radio)
         
-        # 选项内容框架
-        option_frame = tk.Frame(
-            option_container,
-            bg=self.COLORS['bg'],
-            relief='flat',
-            bd=0
-        )
-        option_frame.pack(fill=tk.X, padx=4, pady=4)
+        self.custom_input = QLineEdit()
+        self.custom_input.setObjectName("modernLineEdit")
+        self.custom_input.setPlaceholderText("🖊️ 请输入自定义选项...")
+        self.custom_input.setEnabled(False)
+        other_layout.addWidget(self.custom_input)
         
-        # 单选按钮
-        radio_button = tk.Radiobutton(
-            option_frame,
-            text=text,
-            variable=self.choice_var,
-            value=value,
-            font=('SF Pro Text', 14),
-            fg=self.COLORS['text'],
-            bg=self.COLORS['bg'],
-            activebackground=self.COLORS['bg'],
-            activeforeground=self.COLORS['primary'],
-            selectcolor=self.COLORS['primary'],
-            relief='flat',
-            bd=0,
-            padx=16,
-            pady=12,
-            wraplength=400,
-            justify=tk.LEFT,
-            anchor='w'
-        )
-        radio_button.pack(fill=tk.X)
+        other_frame.setLayout(other_layout)
+        scroll_layout.addWidget(other_frame)
         
-        # macOS风格悬停效果
-        def on_enter(e):
-            option_frame.configure(bg=self.COLORS['border'])
-            radio_button.configure(bg=self.COLORS['border'])
+        # 连接信号
+        other_radio.toggled.connect(self.on_custom_toggled)
+        self.custom_input.textChanged.connect(self.on_custom_changed)
         
-        def on_leave(e):
-            option_frame.configure(bg=self.COLORS['bg'])
-            radio_button.configure(bg=self.COLORS['bg'])
+        scroll_widget.setLayout(scroll_layout)
+        scroll_area.setWidget(scroll_widget)
+        layout.addWidget(scroll_area)
         
-        option_frame.bind("<Enter>", on_enter)
-        option_frame.bind("<Leave>", on_leave)
-        radio_button.bind("<Enter>", on_enter)
-        radio_button.bind("<Leave>", on_leave)
-    
-    def _create_macos_other_option(self, parent, index):
-        """创建macOS风格"其他"选项"""
-        # "其他"选项容器
-        other_container = tk.Frame(
-            parent, 
-            bg=self.COLORS['card_bg'],
-            relief='flat',
-            bd=0
-        )
-        other_container.pack(fill=tk.X, pady=2)
+    def create_buttons(self, layout):
+        """创建现代化按钮区域"""
+        button_frame = QFrame()
+        button_frame.setObjectName("buttonFrame")
+        button_layout = QHBoxLayout(button_frame)
+        button_layout.setSpacing(self.scaled(15))
+        button_layout.addStretch()
         
-        # "其他"选项框架
-        other_frame = tk.Frame(
-            other_container,
-            bg=self.COLORS['bg'],
-            relief='flat',
-            bd=0
-        )
-        other_frame.pack(fill=tk.X, padx=4, pady=4)
+        # 取消按钮
+        cancel_btn = QPushButton("✖ 取消")
+        cancel_btn.setObjectName("cancelButton")
+        cancel_btn.setFixedSize(self.scaled(100), self.scaled(40))
+        cancel_btn.clicked.connect(self.cancel_dialog)
+        cancel_btn.setAttribute(Qt.WA_Hover, True)
+        button_layout.addWidget(cancel_btn)
         
-        # "其他"单选按钮
-        other_radio = tk.Radiobutton(
-            other_frame,
-            text="其他",
-            variable=self.choice_var,
-            value="__custom__",
-            font=('SF Pro Text', 14),
-            fg=self.COLORS['text'],
-            bg=self.COLORS['bg'],
-            activebackground=self.COLORS['bg'],
-            activeforeground=self.COLORS['primary'],
-            selectcolor=self.COLORS['primary'],
-            relief='flat',
-            bd=0,
-            padx=16,
-            pady=8,
-            command=self._on_other_selected
-        )
-        other_radio.pack(anchor=tk.W)
+        # 确定按钮
+        ok_btn = QPushButton("✓ 确定")
+        ok_btn.setObjectName("okButton")
+        ok_btn.setFixedSize(self.scaled(100), self.scaled(40))
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(self.submit_answer)
+        ok_btn.setAttribute(Qt.WA_Hover, True)
+        button_layout.addWidget(ok_btn)
         
-        # 自定义输入框容器
-        custom_container = tk.Frame(
-            other_frame,
-            bg=self.COLORS['card_bg'],
-            relief='solid',
-            bd=1,
-            highlightbackground=self.COLORS['border'],
-            highlightthickness=1
-        )
-        custom_container.pack(fill=tk.X, padx=16, pady=(4, 8))
+        layout.addWidget(button_frame)
         
-        # 自定义输入框
-        self.custom_entry = tk.Entry(
-            custom_container,
-            font=('SF Pro Text', 14),
-            bg=self.COLORS['card_bg'],
-            fg=self.COLORS['text'],
-            relief='flat',
-            bd=8,
-            selectbackground=self.COLORS['primary'],
-            selectforeground='white',
-            insertbackground=self.COLORS['primary'],
-            insertwidth=2
-        )
-        self.custom_entry.pack(fill=tk.X)
+    def add_shadow_effect(self):
+        """添加阴影效果"""
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(self.scaled(25))
+        shadow.setColor(QColor(0, 0, 0, 60))
+        shadow.setOffset(0, self.scaled(8))
+        self.main_container.setGraphicsEffect(shadow)
         
-        # 输入框焦点效果
-        def on_entry_focus_in(event):
-            custom_container.configure(highlightbackground=self.COLORS['primary'])
-            self.choice_var.set("__custom__")
+    def setup_animations(self):
+        """设置动画效果"""
+        # 入场动画
+        self.animation = QPropertyAnimation(self, b"geometry")
+        self.animation.setDuration(400)
+        self.animation.setEasingCurve(QEasingCurve.OutCubic)
         
-        def on_entry_focus_out(event):
-            custom_container.configure(highlightbackground=self.COLORS['border'])
+        # 设置初始位置（从屏幕上方滑入）
+        start_rect = QRect(self.x(), -self.height(), self.width(), self.height())
+        end_rect = QRect(self.x(), self.y(), self.width(), self.height())
         
-        self.custom_entry.bind('<FocusIn>', on_entry_focus_in)
-        self.custom_entry.bind('<FocusOut>', on_entry_focus_out)
-        self.custom_entry.bind('<KeyPress>', lambda e: self.choice_var.set("__custom__"))
+        self.animation.setStartValue(start_rect)
+        self.animation.setEndValue(end_rect)
         
-        # 悬停效果
-        def on_enter(e):
-            other_frame.configure(bg=self.COLORS['border'])
-            other_radio.configure(bg=self.COLORS['border'])
+    def showEvent(self, event):
+        """窗口显示时播放动画"""
+        super().showEvent(event)
+        if self.animation:
+            self.animation.start()
+            
+    def setup_styles(self):
+        """设置现代化样式"""
+        font_size_base = self.scaled(13)
+        font_size_title = self.scaled(18)
+        font_size_content = self.scaled(14)
         
-        def on_leave(e):
-            other_frame.configure(bg=self.COLORS['bg'])
-            other_radio.configure(bg=self.COLORS['bg'])
+        self.setStyleSheet(f"""
+            /* 主容器 */
+            QFrame#mainContainer {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #667eea, stop:1 #764ba2);
+                border-radius: {self.scaled(16)}px;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+            }}
+            
+            /* 字体基础设置 */
+            * {{
+                font-family: 'Microsoft YaHei UI', 'Segoe UI', Arial, sans-serif;
+                color: white;
+            }}
+            
+            /* 头部区域 */
+            QFrame#headerFrame {{
+                background: transparent;
+                border: none;
+            }}
+            
+            /* 标题样式 */
+            QLabel#titleLabel {{
+                font-size: {font_size_title}px;
+                font-weight: bold;
+                color: white;
+                background: transparent;
+                padding: {self.scaled(10)}px;
+            }}
+            
+            /* 内容样式 */
+            QLabel#contentLabel {{
+                font-size: {font_size_content}px;
+                color: rgba(255, 255, 255, 0.9);
+                background: transparent;
+                padding: {self.scaled(5)}px;
+            }}
+            
+            /* 错误标签 */
+            QLabel#errorLabel {{
+                color: #ff6b6b;
+                background: rgba(255, 107, 107, 0.1);
+                border: 1px solid rgba(255, 107, 107, 0.3);
+                border-radius: {self.scaled(8)}px;
+                padding: {self.scaled(10)}px;
+                font-size: {font_size_base}px;
+            }}
+            
+            /* 输入框区域 */
+            QFrame#inputFrame {{
+                background: transparent;
+                border: none;
+            }}
+            
+            /* 文本输入框 */
+            QTextEdit#modernTextEdit {{
+                background: rgba(255, 255, 255, 0.95);
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                border-radius: {self.scaled(12)}px;
+                padding: {self.scaled(15)}px;
+                font-size: {font_size_base}px;
+                color: #333;
+                selection-background-color: #667eea;
+            }}
+            
+            QTextEdit#modernTextEdit:focus {{
+                border: 2px solid rgba(255, 255, 255, 0.8);
+                background: rgba(255, 255, 255, 1.0);
+            }}
+            
+            /* 滚动区域 */
+            QScrollArea#modernScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+            
+            QWidget#scrollWidget {{
+                background: transparent;
+            }}
+            
+            /* 选项框架 */
+            QFrame#optionFrame {{
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: {self.scaled(8)}px;
+                margin: {self.scaled(2)}px;
+            }}
+            
+            QFrame#optionFrame:hover {{
+                background: rgba(255, 255, 255, 0.2);
+                border: 1px solid rgba(255, 255, 255, 0.4);
+            }}
+            
+            QFrame#otherFrame {{
+                background: rgba(255, 255, 255, 0.15);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: {self.scaled(8)}px;
+                margin: {self.scaled(2)}px;
+            }}
+            
+            /* 单选按钮 */
+            QRadioButton#modernRadio {{
+                font-size: {font_size_base}px;
+                color: white;
+                background: transparent;
+                padding: {self.scaled(5)}px;
+                spacing: {self.scaled(8)}px;
+            }}
+            
+            QRadioButton#modernRadio::indicator {{
+                width: {self.scaled(16)}px;
+                height: {self.scaled(16)}px;
+            }}
+            
+            QRadioButton#modernRadio::indicator:unchecked {{
+                border: 2px solid rgba(255, 255, 255, 0.6);
+                border-radius: {self.scaled(8)}px;
+                background: transparent;
+            }}
+            
+            QRadioButton#modernRadio::indicator:checked {{
+                border: 2px solid white;
+                border-radius: {self.scaled(8)}px;
+                background: qradialgradient(cx:0.5, cy:0.5, radius:0.5,
+                    fx:0.5, fy:0.5, stop:0 white, stop:0.3 white, 
+                    stop:0.4 transparent, stop:1 transparent);
+            }}
+            
+            /* 自定义输入框 */
+            QLineEdit#modernLineEdit {{
+                background: rgba(255, 255, 255, 0.9);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: {self.scaled(6)}px;
+                padding: {self.scaled(8)}px;
+                font-size: {font_size_base}px;
+                color: #333;
+            }}
+            
+            QLineEdit#modernLineEdit:focus {{
+                border: 1px solid rgba(255, 255, 255, 0.8);
+                background: rgba(255, 255, 255, 1.0);
+            }}
+            
+            QLineEdit#modernLineEdit:disabled {{
+                background: rgba(255, 255, 255, 0.3);
+                color: rgba(255, 255, 255, 0.5);
+            }}
+            
+            /* 按钮区域 */
+            QFrame#buttonFrame {{
+                background: transparent;
+                border: none;
+            }}
+            
+            /* 取消按钮 */
+            QPushButton#cancelButton {{
+                background: rgba(255, 255, 255, 0.2);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: {self.scaled(20)}px;
+                color: white;
+                font-size: {font_size_base}px;
+                font-weight: bold;
+            }}
+            
+            QPushButton#cancelButton:hover {{
+                background: rgba(255, 255, 255, 0.3);
+                border: 1px solid rgba(255, 255, 255, 0.5);
+            }}
+            
+            QPushButton#cancelButton:pressed {{
+                background: rgba(255, 255, 255, 0.1);
+            }}
+            
+            /* 确定按钮 */
+            QPushButton#okButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #4facfe, stop:1 #00f2fe);
+                border: none;
+                border-radius: {self.scaled(20)}px;
+                color: white;
+                font-size: {font_size_base}px;
+                font-weight: bold;
+            }}
+            
+            QPushButton#okButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #5fbbff, stop:1 #1ff3ff);
+            }}
+            
+            QPushButton#okButton:pressed {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #3f9bde, stop:1 #00d2de);
+            }}
+            
+            /* 滚动条样式 */
+            QScrollBar:vertical {{
+                background: rgba(255, 255, 255, 0.1);
+                width: {self.scaled(8)}px;
+                border-radius: {self.scaled(4)}px;
+                margin: 0;
+            }}
+            
+            QScrollBar::handle:vertical {{
+                background: rgba(255, 255, 255, 0.3);
+                border-radius: {self.scaled(4)}px;
+                min-height: {self.scaled(20)}px;
+            }}
+            
+            QScrollBar::handle:vertical:hover {{
+                background: rgba(255, 255, 255, 0.5);
+            }}
+            
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+        """)
         
-        other_frame.bind("<Enter>", on_enter)
-        other_frame.bind("<Leave>", on_leave)
-        other_radio.bind("<Enter>", on_enter)
-        other_radio.bind("<Leave>", on_leave)
-    
-    def _on_other_selected(self):
-        """当选择"其他"选项时，聚焦到输入框"""
-        if self.custom_entry:
-            self.custom_entry.focus_set()
-    
-    def _create_macos_button_section(self, parent):
-        """创建macOS风格按钮区域"""
-        button_frame = tk.Frame(parent, bg=self.COLORS['card_bg'])
-        button_frame.pack(fill=tk.X, pady=(16, 0))
-        
-        # 按钮容器（居中对齐）
-        button_container = tk.Frame(button_frame, bg=self.COLORS['card_bg'])
-        button_container.pack()
-        
-        # 取消按钮（macOS次要按钮样式）
-        cancel_btn = self._create_macos_button(
-            button_container, 
-            "取消", 
-            self._on_cancel,
-            style='secondary'
-        )
-        cancel_btn.pack(side=tk.LEFT, padx=(0, 12))
-        
-        # 确定按钮（macOS主要按钮样式）
-        ok_btn = self._create_macos_button(
-            button_container,
-            "确定",
-            self._on_ok,
-            style='primary'
-        )
-        ok_btn.pack(side=tk.LEFT)
-    
-    def _create_macos_button(self, parent, text, command, style='primary'):
-        """创建macOS风格按钮"""
-        if style == 'primary':
-            bg_color = self.COLORS['primary']
-            hover_color = self.COLORS['primary_hover']
-            text_color = 'white'
+    def on_custom_toggled(self, checked):
+        """处理自定义选项切换"""
+        self.custom_input.setEnabled(checked)
+        if checked:
+            self.custom_input.setFocus()
         else:
-            bg_color = self.COLORS['bg']
-            hover_color = self.COLORS['border']
-            text_color = self.COLORS['text']
-        
-        button = tk.Button(
-            parent,
-            text=text,
-            command=command,
-            font=('SF Pro Text', 14, 'bold'),
-            fg=text_color,
-            bg=bg_color,
-            activebackground=hover_color,
-            activeforeground=text_color,
-            relief='flat',
-            bd=0,
-            padx=24,
-            pady=10,
-            cursor='hand2',
-            width=8
-        )
-        
-        # macOS风格悬停效果
-        def on_enter(e):
-            button.configure(bg=hover_color)
-        
-        def on_leave(e):
-            button.configure(bg=bg_color)
-        
-        button.bind("<Enter>", on_enter)
-        button.bind("<Leave>", on_leave)
-        
-        return button
-    
-    def _bind_events(self):
-        """绑定键盘事件"""
-        self.root.protocol("WM_DELETE_WINDOW", self._on_cancel)
-        self.root.bind('<Return>', lambda e: self._on_ok())
-        self.root.bind('<Escape>', lambda e: self._on_cancel())
-        self.root.bind('<Command-w>', lambda e: self._on_cancel())  # macOS快捷键
-    
-    def _on_ok(self):
-        """确定按钮点击事件"""
-        if self.question.question_type == 'qa':
-            # 获取文本输入
-            answer = self.text_widget.get("1.0", tk.END).strip()
-            if not answer:
-                self._show_macos_warning("请输入回答内容")
-                return
-            self.result = answer
+            self.custom_input.clear()
             
-        elif self.question.question_type == 'choice':
-            # 获取选择结果
-            selected = self.choice_var.get()
-            if not selected:
-                self._show_macos_warning("请选择一个选项")
-                return
-            
-            if selected == "__custom__":
-                # 处理自定义输入
-                custom_text = self.custom_entry.get().strip()
-                if not custom_text:
-                    self._show_macos_warning("请输入自定义选项内容")
+    def on_custom_changed(self, text):
+        """处理自定义输入变化"""
+        if text.strip():
+            # 如果有自定义文本，自动选择"其他"选项
+            other_button = self.choice_group.button(len(self.question.options))
+            if other_button and not other_button.isChecked():
+                other_button.setChecked(True)
+    
+    def show_error(self, message, duration=3000):
+        """显示错误信息"""
+        self.error_label.setText(message)
+        self.error_label.setVisible(True)
+        
+        # 自动隐藏错误信息
+        QTimer.singleShot(duration, lambda: self.error_label.setVisible(False))
+        
+    def submit_answer(self):
+        """提交答案"""
+        try:
+            if self.question.question_type == 'qa':
+                # 问答题
+                answer = self.text_input.toPlainText().strip()
+                if not answer:
+                    self.show_error("请输入您的回答")
                     return
-                self.result = custom_text
-            else:
-                self.result = selected
-        
-        self.root.destroy()
+                self.result = answer
+                
+            elif self.question.question_type == 'choice':
+                # 选择题
+                checked_button = self.choice_group.checkedButton()
+                if not checked_button:
+                    self.show_error("请选择一个选项")
+                    return
+                    
+                button_id = self.choice_group.id(checked_button)
+                
+                if button_id == len(self.question.options):  # "其他"选项
+                    custom_text = self.custom_input.text().strip()
+                    if not custom_text:
+                        self.show_error("请输入自定义选项内容")
+                        return
+                    self.result = custom_text
+                else:
+                    # 预设选项
+                    option = self.question.options[button_id]
+                    self.result = option.value
+            
+            self.finished.emit(self.result)
+            self.close()
+            
+        except Exception as e:
+            self.show_error(f"提交失败: {str(e)}")
     
-    def _on_cancel(self):
-        """取消按钮点击事件"""
+    def cancel_dialog(self):
+        """取消对话框"""
         self.result = None
-        self.root.destroy()
-    
-    def _show_macos_warning(self, message):
-        """显示macOS风格警告对话框"""
-        messagebox.showwarning("", message, parent=self.root)
+        self.finished.emit(None)
+        self.close()
+        
+    def keyPressEvent(self, event):
+        """处理键盘事件"""
+        if event.key() == Qt.Key_Escape:
+            self.cancel_dialog()
+        elif event.key() == Qt.Key_Return and event.modifiers() == Qt.ControlModifier:
+            self.submit_answer()
+        else:
+            super().keyPressEvent(event)
+            
+    def mousePressEvent(self, event):
+        """处理鼠标按压事件，实现窗口拖拽"""
+        if event.button() == Qt.LeftButton:
+            self.drag_start_position = event.globalPos() - self.frameGeometry().topLeft()
+            event.accept()
+            
+    def mouseMoveEvent(self, event):
+        """处理鼠标移动事件，实现窗口拖拽"""
+        if event.buttons() == Qt.LeftButton and hasattr(self, 'drag_start_position'):
+            self.move(event.globalPos() - self.drag_start_position)
+            event.accept()
 
 
 class UIHandler:
-    """UI处理器类"""
+    """UI处理器"""
     
     @staticmethod
     def show_question(question: ParsedQuestion) -> Optional[str]:
-        """
-        显示问题对话框
+        """同步显示问题对话框"""
+        if not QApplication.instance():
+            app = QApplication(sys.argv)
+            app.setQuitOnLastWindowClosed(False)
+        else:
+            app = QApplication.instance()
         
-        Args:
-            question: 解析后的问题对象
-            
-        Returns:
-            Optional[str]: 用户回答，取消时返回None
-        """
+        result = None
+        
         try:
-            dialog = MacOSQuestionDialog(question)
-            return dialog.show_dialog()
+            dialog = ModernQuestionDialog(question)
+            
+            def on_finished(result_value):
+                nonlocal result
+                result = result_value
+                app.quit()
+            
+            dialog.finished.connect(on_finished)
+            dialog.show()
+            
+            app.exec_()
+            return result
+            
         except Exception as e:
             print(f"显示问题对话框时出错: {e}")
             return None
     
-    @staticmethod
+    @staticmethod  
     async def show_question_async(question: ParsedQuestion) -> Optional[str]:
-        """
-        异步显示问题对话框
-        
-        Args:
-            question: 解析后的问题对象
-            
-        Returns:
-            Optional[str]: 用户回答，取消时返回None
-        """
-        loop = asyncio.get_event_loop()
+        """异步显示问题对话框"""
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
         
         def run_dialog():
-            try:
-                dialog = MacOSQuestionDialog(question)
-                return dialog.show_dialog()
-            except Exception as e:
-                print(f"异步显示问题对话框时出错: {e}")
-                return None
+            return UIHandler.show_question(question)
         
-        # 在线程池中运行GUI对话框
-        result = await loop.run_in_executor(None, run_dialog)
-        return result
+        with ThreadPoolExecutor() as executor:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(executor, run_dialog)
+            return result
 
 
-# 测试用例
-if __name__ == "__main__":
-    from question_parser import ParsedQuestion, QuestionOption
-    
-    # 测试问答题
-    qa_question = ParsedQuestion(
-        question_type="qa",
-        title="请输入你的想法",
-        content="你对这个功能有什么建议？"
-    )
-    
-    # 测试选择题
-    choice_question = ParsedQuestion(
-        question_type="choice",
-        title="选择你喜欢的颜色",
-        content="请选择一个颜色：",
-        options=[
-            QuestionOption(value="red", text="红色"),
-            QuestionOption(value="blue", text="蓝色"),
-            QuestionOption(value="green", text="绿色")
-        ]
-    )
-    
-    ui_handler = UIHandler()
-    
-    print("测试问答题...")
-    qa_result = ui_handler.show_question(qa_question)
-    print(f"问答题结果: {qa_result}")
-    
-    print("测试选择题...")
-    choice_result = ui_handler.show_question(choice_question)
-    print(f"选择题结果: {choice_result}") 
+# 保持向后兼容
+SimpleQuestionDialog = ModernQuestionDialog 

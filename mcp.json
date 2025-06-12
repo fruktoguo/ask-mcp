@@ -3,7 +3,7 @@
     "ask-mcp": {
       "command": "python.exe",
       "args": [
-        "C:\\Users\\Admin\\Documents\\GitHub\\ask-mcp\\fastmcp_server.py"
+        "D:\\GitProjects\\ask-mcp\\fastmcp_server.py"
       ],
       "env": {}
     }
