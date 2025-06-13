@@ -179,9 +179,7 @@ def create_question_prompt(question_type: str, title: str, content: str, options
 
 # 主函数
 if __name__ == "__main__":
-    print("启动 Ask-MCP (FastMCP版本)...")
-    print("使用 'fastmcp dev fastmcp_server.py' 进行开发测试")
-    print("使用 'fastmcp install fastmcp_server.py' 安装到Claude Desktop")
+    print("启动 Ask-MCP")
     
     # 运行服务器
     mcp.run() 
