@@ -15,7 +15,7 @@
 
 ## 📋 项目简介
 
-Ask-MCP 是一个基于 Model Context Protocol (MCP) 的交互式问答工具，它允许AI助手在对话过程中通过美观的图形界面向用户提出问题并获取回答。
+Ask-MCP 是一个基于 Model Context Protocol (MCP) 的交互式问答工具，它允许AI助手在对话过程中通过美观的图形界面向用户提出问题并获取回答。**现已支持图片粘贴和拖拽功能，遵循MCP协议标准！**
 
 ## 🚀 快速开始
 
@@ -75,6 +75,29 @@ AI可以通过调用 `ask_user_question` 工具来向用户提问：
     <option value="rust">Rust</option>
   </options>
 </question>
+```
+
+### 🖼️ 图片支持功能
+
+**新功能特性：**
+- ✅ **图片粘贴**: 支持 Ctrl+V 粘贴剪贴板图片
+- ✅ **图片拖拽**: 支持直接拖拽图片文件到输入框
+- ✅ **多格式支持**: PNG, JPG, GIF, BMP 等常见格式
+- ✅ **MCP协议兼容**: 图片数据按照MCP标准进行base64编码
+- ✅ **智能显示**: 图片以占位符形式显示，不影响界面美观
+
+**图片数据格式：**
+```json
+{
+  "text": "用户输入的文本内容",
+  "images": [
+    {
+      "type": "image",
+      "data": "base64编码的图片数据",
+      "mimeType": "image/png"
+    }
+  ]
+}
 ```
 
 ## 🏗️ 项目结构
