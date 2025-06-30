@@ -34,38 +34,46 @@ class ImageSupportedTextEdit(QTextEdit):
         
     def insertFromMimeData(self, source):
         """处理MIME数据插入"""
-        # 优先尝试处理图片数据
-        if source.hasImage():
-            image = source.imageData()
-            if image:
-                self.insert_image(image)
-                return
-                
-        # 处理URL（包括文件路径）
-        if source.hasUrls():
-            for url in source.urls():
-                if url.isLocalFile():
-                    file_path = url.toLocalFile()
+        try:
+            # 优先尝试处理图片数据
+            if source.hasImage():
+                image = source.imageData()
+                if image:
+                    self.insert_image(image)
+                    return
+                    
+            # 处理URL（包括文件路径）
+            if source.hasUrls():
+                for url in source.urls():
+                    if url.isLocalFile():
+                        file_path = url.toLocalFile()
+                        if self.is_image_file(file_path):
+                            self.insert_image_from_file(file_path)
+                            return
+            
+            # 处理文本中的图片路径（QQ等应用复制图片时的情况）
+            if source.hasText():
+                text = source.text().strip()
+                if text.startswith('file:///') and self.is_image_file(text.replace('file:///', '')):
+                    # 从文件路径加载图片
+                    file_path = text.replace('file:///', '').replace('/', '\\')
                     if self.is_image_file(file_path):
                         self.insert_image_from_file(file_path)
                         return
-        
-        # 处理文本中的图片路径（QQ等应用复制图片时的情况）
-        if source.hasText():
-            text = source.text().strip()
-            if text.startswith('file:///') and self.is_image_file(text.replace('file:///', '')):
-                # 从文件路径加载图片
-                file_path = text.replace('file:///', '').replace('/', '\\')
-                if self.is_image_file(file_path):
-                    self.insert_image_from_file(file_path)
-                    return
-            elif text.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp')):
-                # 检查是否是图片文件路径
-                if self.is_image_file(text):
-                    self.insert_image_from_file(text)
-                    return
-                        
-        super().insertFromMimeData(source)
+                elif text.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp')):
+                    # 检查是否是图片文件路径
+                    if self.is_image_file(text):
+                        self.insert_image_from_file(text)
+                        return
+                            
+            super().insertFromMimeData(source)
+        except Exception as e:
+            print(f"处理粘贴数据时出错: {e}")
+            # 即使出错也要调用父类方法，避免完全失败
+            try:
+                super().insertFromMimeData(source)
+            except:
+                pass  # 忽略父类方法的错误
         
     def dragEnterEvent(self, event):
         """拖拽进入事件"""
@@ -83,12 +91,24 @@ class ImageSupportedTextEdit(QTextEdit):
             
     def dropEvent(self, event):
         """拖拽放下事件"""
-        if event.mimeData().hasImage() or self.has_image_urls(event.mimeData()):
-            self.insertFromMimeData(event.mimeData())
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
-            
+        try:
+            if event.mimeData().hasImage():
+                self.insert_image(event.mimeData().imageData())
+                event.acceptProposedAction()
+            elif self.has_image_urls(event.mimeData()):
+                for url in event.mimeData().urls():
+                    if url.isLocalFile():
+                        file_path = url.toLocalFile()
+                        if self.is_image_file(file_path):
+                            self.insert_image_from_file(file_path)
+                            break
+                event.acceptProposedAction()
+            else:
+                super().dropEvent(event)
+        except Exception as e:
+            print(f"拖拽事件处理失败: {e}")
+            # 不抛出异常，避免闪退
+        
     def has_image_urls(self, mime_data):
         """检查是否包含图片URL"""
         if mime_data.hasUrls():
@@ -114,6 +134,11 @@ class ImageSupportedTextEdit(QTextEdit):
                 # QPixmap或QImage
                 pixmap = image if isinstance(image, QPixmap) else QPixmap.fromImage(image)
                 
+                # 检查图片是否有效
+                if pixmap.isNull():
+                    print("图片数据无效，跳过插入")
+                    return
+                
                 # 缩放图片到合适大小
                 max_width = 300
                 max_height = 200
@@ -124,8 +149,18 @@ class ImageSupportedTextEdit(QTextEdit):
                 from PyQt5.QtCore import QBuffer, QIODevice
                 buffer = QBuffer()
                 buffer.open(QIODevice.WriteOnly)
-                pixmap.save(buffer, "PNG")
+                
+                # 尝试保存为PNG格式
+                if not pixmap.save(buffer, "PNG"):
+                    print("无法将图片保存为PNG格式")
+                    return
+                    
                 image_data = buffer.data()
+                
+                # 检查数据是否有效
+                if not image_data or len(image_data) == 0:
+                    print("图片数据为空，跳过插入")
+                    return
                 
                 # 按MCP协议格式存储
                 image_info = {
@@ -142,7 +177,8 @@ class ImageSupportedTextEdit(QTextEdit):
                 
         except Exception as e:
             print(f"插入图片失败: {e}")
-            
+            # 不抛出异常，避免闪退
+        
     def insert_image_from_file(self, file_path):
         """从文件插入图片"""
         try:
@@ -159,6 +195,12 @@ class ImageSupportedTextEdit(QTextEdit):
                 print(f"图片文件不存在: {file_path}")
                 return
             
+            # 检查文件大小（避免加载过大的文件）
+            file_size = os.path.getsize(file_path)
+            if file_size > 10 * 1024 * 1024:  # 10MB限制
+                print(f"图片文件过大 ({file_size} bytes): {file_path}")
+                return
+            
             # 加载图片并创建QPixmap
             pixmap = QPixmap(file_path)
             if pixmap.isNull():
@@ -172,8 +214,17 @@ class ImageSupportedTextEdit(QTextEdit):
                 pixmap = pixmap.scaled(max_width, max_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 
             # 读取原始文件数据用于MCP协议
-            with open(file_path, 'rb') as f:
-                image_data = f.read()
+            try:
+                with open(file_path, 'rb') as f:
+                    image_data = f.read()
+            except Exception as e:
+                print(f"读取图片文件失败: {e}")
+                return
+                
+            # 检查数据是否有效
+            if not image_data or len(image_data) == 0:
+                print(f"图片文件数据为空: {file_path}")
+                return
                 
             # 获取MIME类型
             mime_type, _ = mimetypes.guess_type(file_path)
@@ -196,7 +247,8 @@ class ImageSupportedTextEdit(QTextEdit):
         except Exception as e:
             print(f"从文件插入图片失败: {e}")
             print(f"文件路径: {file_path}")
-            
+            # 不抛出异常，避免闪退
+        
     def get_content_with_images(self):
         """获取包含图片的完整内容（MCP协议格式）"""
         text_content = self.toPlainText()
@@ -211,92 +263,200 @@ class ImageSupportedTextEdit(QTextEdit):
         }
 
 
-class ImageSupportedLineEdit(QTextEdit):
-    """支持图片粘贴的单行文本编辑器（基于QTextEdit实现）"""
+class AutoResizeTextEdit(QTextEdit):
+    """自适应高度的文本编辑器，支持图片粘贴和拖拽"""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, is_single_line=False):
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.images = []  # 存储图片数据，格式遵循MCP协议
+        self.is_single_line = is_single_line
+        self._updating_height = False  # 防止高度更新时的递归调用
         
-        # 设置为单行模式
-        self.setMaximumHeight(40)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # 基础设置
+        self.setAcceptRichText(False)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         
-        # 禁用换行
-        self.setLineWrapMode(QTextEdit.NoWrap)
+        if is_single_line:
+            # 单行模式设置
+            self.setLineWrapMode(QTextEdit.NoWrap)
+            self.setMinimumHeight(40)
+            self.setMaximumHeight(120)  # 允许一定的扩展高度
+        else:
+            # 多行模式设置
+            self.setLineWrapMode(QTextEdit.WidgetWidth)
+            self.setMinimumHeight(60)
+            self.setMaximumHeight(300)
         
+        # 设置文档属性
+        try:
+            self.document().setDocumentMargin(8)
+            # 连接文档内容变化信号以自动调整高度
+            self.document().contentsChanged.connect(self._adjust_height)
+            self.textChanged.connect(self._on_text_changed)
+        except Exception as e:
+            print(f"设置文档属性时出错: {e}")
+    
+    def _adjust_height(self):
+        """自动调整高度以适应内容"""
+        if self._updating_height:
+            return
+            
+        try:
+            self._updating_height = True
+            
+            # 计算文档需要的高度
+            doc_height = self.document().size().height()
+            margins = self.contentsMargins()
+            total_height = int(doc_height + margins.top() + margins.bottom() + 10)
+            
+            # 限制高度范围
+            min_height = self.minimumHeight()
+            max_height = self.maximumHeight()
+            new_height = max(min_height, min(max_height, total_height))
+            
+            # 只有当高度确实需要改变时才调整
+            if abs(self.height() - new_height) > 5:
+                self.setFixedHeight(new_height)
+                
+        except Exception as e:
+            print(f"调整高度时出错: {e}")
+        finally:
+            self._updating_height = False
+    
+    def _on_text_changed(self):
+        """处理文本变化"""
+        try:
+            if self.is_single_line:
+                # 单行模式：限制文本长度并阻止换行
+                text = self.toPlainText()
+                if '\n' in text or '\r' in text:
+                    # 移除换行符
+                    clean_text = text.replace('\n', ' ').replace('\r', ' ')
+                    cursor = self.textCursor()
+                    cursor.select(cursor.Document)
+                    cursor.insertText(clean_text)
+                
+                # 限制文本长度
+                if len(text) > 500:
+                    cursor = self.textCursor()
+                    cursor.select(cursor.Document)
+                    cursor.insertText(text[:500])
+            
+            # 调整高度
+            self._adjust_height()
+            
+        except Exception as e:
+            print(f"处理文本变化时出错: {e}")
+    
+    def keyPressEvent(self, event):
+        """处理键盘事件"""
+        try:
+            # 单行模式下阻止换行
+            if self.is_single_line and event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                return
+                
+            # 处理Ctrl+V粘贴图片
+            if event.key() == Qt.Key_V and event.modifiers() == Qt.ControlModifier:
+                try:
+                    clipboard = QApplication.clipboard()
+                    mime_data = clipboard.mimeData()
+                    
+                    if mime_data.hasImage():
+                        self.insert_image(mime_data.imageData())
+                        return
+                    
+                    # 处理文件路径
+                    if mime_data.hasText():
+                        text = mime_data.text().strip()
+                        if self.is_image_file(text):
+                            self.insert_image_from_file(text)
+                            return
+                except Exception as e:
+                    print(f"处理粘贴事件时出错: {e}")
+                
+            super().keyPressEvent(event)
+        except Exception as e:
+            print(f"键盘事件处理失败: {e}")
+            try:
+                super().keyPressEvent(event)
+            except:
+                pass
+    
+    def insertFromMimeData(self, source):
+        """处理MIME数据插入"""
+        try:
+            if source.hasImage():
+                self.insert_image(source.imageData())
+                return
+                
+            if source.hasUrls():
+                for url in source.urls():
+                    if url.isLocalFile():
+                        file_path = url.toLocalFile()
+                        if self.is_image_file(file_path):
+                            self.insert_image_from_file(file_path)
+                            return
+            
+            super().insertFromMimeData(source)
+        except Exception as e:
+            print(f"处理MIME数据时出错: {e}")
+            try:
+                super().insertFromMimeData(source)
+            except:
+                pass
+    
     def dragEnterEvent(self, event):
         """拖拽进入事件"""
-        if event.mimeData().hasImage() or self.has_image_urls(event.mimeData()):
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
+        try:
+            if event.mimeData().hasImage() or self.has_image_urls(event.mimeData()):
+                event.acceptProposedAction()
+            else:
+                super().dragEnterEvent(event)
+        except Exception as e:
+            print(f"拖拽进入事件处理失败: {e}")
             
     def dragMoveEvent(self, event):
         """拖拽移动事件"""
-        if event.mimeData().hasImage() or self.has_image_urls(event.mimeData()):
-            event.acceptProposedAction()
-        else:
-            super().dragMoveEvent(event)
+        try:
+            if event.mimeData().hasImage() or self.has_image_urls(event.mimeData()):
+                event.acceptProposedAction()
+            else:
+                super().dragMoveEvent(event)
+        except Exception as e:
+            print(f"拖拽移动事件处理失败: {e}")
             
     def dropEvent(self, event):
         """拖拽放下事件"""
-        if event.mimeData().hasImage():
-            self.insert_image(event.mimeData().imageData())
-            event.acceptProposedAction()
-        elif self.has_image_urls(event.mimeData()):
-            for url in event.mimeData().urls():
-                if url.isLocalFile():
-                    file_path = url.toLocalFile()
-                    if self.is_image_file(file_path):
-                        self.insert_image_from_file(file_path)
-                        break
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
-            
-    def keyPressEvent(self, event):
-        """处理键盘事件，支持Ctrl+V粘贴图片，阻止换行"""
-        # 阻止换行键
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-            return
-            
-        if event.key() == Qt.Key_V and event.modifiers() == Qt.ControlModifier:
-            clipboard = QApplication.clipboard()
-            mime_data = clipboard.mimeData()
-            
-            # 优先处理图片数据
-            if mime_data.hasImage():
-                self.insert_image(mime_data.imageData())
-                return
-            
-            # 处理文本中的图片路径
-            if mime_data.hasText():
-                text = mime_data.text().strip()
-                if text.startswith('file:///') and self.is_image_file(text.replace('file:///', '')):
-                    # 从文件路径加载图片
-                    file_path = text.replace('file:///', '').replace('/', '\\')
-                    if self.is_image_file(file_path):
-                        self.insert_image_from_file(file_path)
-                        return
-                elif text.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp')):
-                    # 检查是否是图片文件路径
-                    if self.is_image_file(text):
-                        self.insert_image_from_file(text)
-                        return
-                
-        super().keyPressEvent(event)
-        
+        try:
+            if event.mimeData().hasImage():
+                self.insert_image(event.mimeData().imageData())
+                event.acceptProposedAction()
+            elif self.has_image_urls(event.mimeData()):
+                for url in event.mimeData().urls():
+                    if url.isLocalFile():
+                        file_path = url.toLocalFile()
+                        if self.is_image_file(file_path):
+                            self.insert_image_from_file(file_path)
+                            break
+                event.acceptProposedAction()
+            else:
+                super().dropEvent(event)
+        except Exception as e:
+            print(f"拖拽放下事件处理失败: {e}")
+    
     def has_image_urls(self, mime_data):
         """检查是否包含图片URL"""
-        if mime_data.hasUrls():
-            for url in mime_data.urls():
-                if url.isLocalFile():
-                    file_path = url.toLocalFile()
-                    if self.is_image_file(file_path):
-                        return True
+        try:
+            if mime_data.hasUrls():
+                for url in mime_data.urls():
+                    if url.isLocalFile():
+                        file_path = url.toLocalFile()
+                        if self.is_image_file(file_path):
+                            return True
+        except:
+            pass
         return False
         
     def is_image_file(self, file_path):
@@ -308,93 +468,96 @@ class ImageSupportedLineEdit(QTextEdit):
             return False
             
     def insert_image(self, image):
-        """插入图片（从QPixmap或QImage）"""
+        """插入图片"""
         try:
             if hasattr(image, 'save'):
-                # QPixmap或QImage
                 pixmap = image if isinstance(image, QPixmap) else QPixmap.fromImage(image)
                 
-                # 缩放图片到适合单行的大小
-                max_height = 30  # 单行模式下图片高度较小
+                if pixmap.isNull():
+                    return
+                
+                # 根据模式调整图片大小
+                if self.is_single_line:
+                    max_height = 30
+                else:
+                    max_height = 100
+                    
                 if pixmap.height() > max_height:
                     pixmap = pixmap.scaledToHeight(max_height, Qt.SmoothTransformation)
                 
-                # 转换为字节数据
+                # 保存图片数据
                 from PyQt5.QtCore import QBuffer, QIODevice
                 buffer = QBuffer()
                 buffer.open(QIODevice.WriteOnly)
-                pixmap.save(buffer, "PNG")
-                image_data = buffer.data()
                 
-                # 按MCP协议格式存储
-                image_info = {
-                    "type": "image",
-                    "data": base64.b64encode(image_data).decode('utf-8'),
-                    "mimeType": "image/png"
-                }
-                
-                self.images.append(image_info)
-                
-                # 在文本编辑器中插入实际图片（不显示占位符）
-                cursor = self.textCursor()
-                cursor.insertImage(pixmap.toImage())
-                    
+                if pixmap.save(buffer, "PNG"):
+                    image_data = buffer.data()
+                    if image_data:
+                        image_info = {
+                            "type": "image",
+                            "data": base64.b64encode(image_data).decode('utf-8'),
+                            "mimeType": "image/png"
+                        }
+                        self.images.append(image_info)
+                        
+                        # 插入图片到文档
+                        cursor = self.textCursor()
+                        cursor.insertImage(pixmap.toImage())
+                        
         except Exception as e:
             print(f"插入图片失败: {e}")
-            
+    
     def insert_image_from_file(self, file_path):
         """从文件插入图片"""
         try:
-            # 处理文件路径格式
             import os
+            
             if file_path.startswith('file:///'):
                 file_path = file_path.replace('file:///', '')
             
-            # 规范化路径
             file_path = os.path.normpath(file_path)
             
-            # 检查文件是否存在
             if not os.path.exists(file_path):
-                print(f"图片文件不存在: {file_path}")
+                return
+                
+            file_size = os.path.getsize(file_path)
+            if file_size > 10 * 1024 * 1024:  # 10MB限制
                 return
             
-            # 加载图片并创建QPixmap
             pixmap = QPixmap(file_path)
-            if pixmap.isNull():
-                print(f"无法加载图片: {file_path}")
-                return
+            if not pixmap.isNull():
+                # 调整图片大小
+                if self.is_single_line:
+                    max_height = 30
+                else:
+                    max_height = 200
+                    
+                if pixmap.height() > max_height:
+                    pixmap = pixmap.scaledToHeight(max_height, Qt.SmoothTransformation)
                 
-            # 缩放图片到适合单行的大小
-            max_height = 30  # 单行模式下图片高度较小
-            if pixmap.height() > max_height:
-                pixmap = pixmap.scaledToHeight(max_height, Qt.SmoothTransformation)
+                # 读取原始文件数据
+                with open(file_path, 'rb') as f:
+                    image_data = f.read()
                 
-            # 读取原始文件数据用于MCP协议
-            with open(file_path, 'rb') as f:
-                image_data = f.read()
-                
-            # 获取MIME类型
-            mime_type, _ = mimetypes.guess_type(file_path)
-            if not mime_type or not mime_type.startswith('image/'):
-                mime_type = 'image/png'
-                
-            # 按MCP协议格式存储
-            image_info = {
-                "type": "image",
-                "data": base64.b64encode(image_data).decode('utf-8'),
-                "mimeType": mime_type
-            }
-            
-            self.images.append(image_info)
-            
-            # 在文本编辑器中插入实际图片（不显示占位符）
-            cursor = self.textCursor()
-            cursor.insertImage(pixmap.toImage())
-                
+                if image_data:
+                    mime_type, _ = mimetypes.guess_type(file_path)
+                    if not mime_type or not mime_type.startswith('image/'):
+                        mime_type = 'image/png'
+                    
+                    image_info = {
+                        "type": "image",
+                        "data": base64.b64encode(image_data).decode('utf-8'),
+                        "mimeType": mime_type
+                    }
+                    self.images.append(image_info)
+                    
+                    # 插入图片到文档
+                    cursor = self.textCursor()
+                    cursor.insertImage(pixmap.toImage())
+                    
         except Exception as e:
             print(f"从文件插入图片失败: {e}")
-            print(f"文件路径: {file_path}")
-            
+    
     def get_content_with_images(self):
         """获取包含图片的完整内容（MCP协议格式）"""
         text_content = self.toPlainText()
@@ -402,11 +565,18 @@ class ImageSupportedLineEdit(QTextEdit):
         if not self.images:
             return text_content
             
-        # 返回包含文本和图片的结构化数据
         return {
             "text": text_content,
             "images": self.images
         }
+
+
+# 保持向后兼容
+class ImageSupportedLineEdit(AutoResizeTextEdit):
+    """支持图片粘贴的单行文本编辑器（向后兼容）"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent, is_single_line=True)
 
 
 class ModernQuestionDialog(QWidget):
@@ -446,8 +616,8 @@ class ModernQuestionDialog(QWidget):
         # 使用较小的缩放因子，确保界面不会过大
         scale = min(width_scale, height_scale)
         
-        # 限制缩放范围在0.7到1.5之间
-        return max(0.7, min(1.5, scale))
+        # 限制缩放范围在0.6到1.2之间，确保在小屏幕上也能完整显示
+        return max(0.6, min(1.2, scale))
         
     def scaled(self, value):
         """根据缩放因子调整数值"""
@@ -460,15 +630,27 @@ class ModernQuestionDialog(QWidget):
         self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         
-        # 根据内容类型和缩放因子设置窗口大小
+        # 初始设置一个基础大小
         if self.question.question_type == 'choice':
-            width = self.scaled(600)
-            height = self.scaled(500)
+            base_width = 600
+            base_height = 600  # 增加初始高度以容纳"其他"选项
         else:
-            width = self.scaled(550)
-            height = self.scaled(400)
+            base_width = 550
+            base_height = 450
             
-        self.setFixedSize(width, height)
+        # 应用缩放
+        width = self.scaled(base_width)
+        height = self.scaled(base_height)
+        
+        # 确保窗口不会超出屏幕边界
+        max_width = int(self.screen.width() * 0.9)
+        max_height = int(self.screen.height() * 0.9)
+        
+        width = min(width, max_width)
+        height = min(height, max_height)
+            
+        # 设置初始大小（之后会根据内容调整）
+        self.resize(width, height)
         
         # 居中显示
         self.center_window()
@@ -485,11 +667,55 @@ class ModernQuestionDialog(QWidget):
         # 添加阴影效果
         self.add_shadow_effect()
         
+        # 根据内容调整最终大小
+        self.adjust_size_to_content()
+        
     def center_window(self):
-        """窗口居中"""
+        """窗口居中，确保完全在屏幕内"""
+        # 计算居中位置
         x = (self.screen.width() - self.width()) // 2
         y = (self.screen.height() - self.height()) // 2
+        
+        # 确保窗口不会超出屏幕边界
+        x = max(0, min(x, self.screen.width() - self.width()))
+        y = max(0, min(y, self.screen.height() - self.height()))
+        
         self.move(x, y)
+    
+    def adjust_size_to_content(self):
+        """根据内容调整对话框大小"""
+        try:
+            # 让布局先计算所需的大小
+            self.main_container.adjustSize()
+            
+            # 获取内容所需的大小
+            content_size = self.main_container.sizeHint()
+            
+            # 添加一些边距
+            padding = self.scaled(60)  # 总边距
+            needed_width = content_size.width() + padding
+            needed_height = content_size.height() + padding
+            
+            # 限制最大和最小尺寸
+            min_width = self.scaled(500)
+            min_height = self.scaled(400)
+            max_width = int(self.screen.width() * 0.9)
+            max_height = int(self.screen.height() * 0.9)
+            
+            # 计算最终尺寸
+            final_width = max(min_width, min(needed_width, max_width))
+            final_height = max(min_height, min(needed_height, max_height))
+            
+            # 只有当尺寸确实需要改变时才调整
+            if abs(self.width() - final_width) > 10 or abs(self.height() - final_height) > 10:
+                self.resize(final_width, final_height)
+                self.center_window()  # 重新居中
+                
+                # 更新主容器大小
+                self.main_container.setGeometry(0, 0, self.width(), self.height())
+                
+        except Exception as e:
+            print(f"调整对话框大小时出错: {e}")
         
     def setup_main_container(self):
         """设置主容器"""
@@ -618,18 +844,21 @@ class ModernQuestionDialog(QWidget):
         self.choice_group.addButton(other_radio, len(self.question.options))
         other_layout.addWidget(other_radio)
         
-        self.custom_input = ImageSupportedLineEdit()
-        self.custom_input.setObjectName("modernLineEdit")
-        self.custom_input.setPlaceholderText("🖊️ 请输入自定义选项... 📎 支持拖拽或粘贴图片")
+        self.custom_input = AutoResizeTextEdit(is_single_line=False)
+        self.custom_input.setObjectName("modernTextEdit")
+        self.custom_input.setPlaceholderText("🖊️ 请输入自定义选项... 📎 支持拖拽或粘贴图片\n支持多行文本，窗口会自动适应内容高度")
         self.custom_input.setEnabled(False)
         other_layout.addWidget(self.custom_input)
         
         other_frame.setLayout(other_layout)
         scroll_layout.addWidget(other_frame)
         
-        # 连接信号
-        other_radio.toggled.connect(self.on_custom_toggled)
-        self.custom_input.textChanged.connect(self.on_custom_changed)
+        # 连接信号 - 使用安全的信号连接
+        try:
+            other_radio.toggled.connect(self.on_custom_toggled)
+            self.custom_input.textChanged.connect(self.on_custom_changed)
+        except Exception as e:
+            print(f"连接信号时出错: {e}")
         
         scroll_widget.setLayout(scroll_layout)
         scroll_area.setWidget(scroll_widget)
@@ -824,24 +1053,11 @@ class ModernQuestionDialog(QWidget):
                     stop:0.4 transparent, stop:1 transparent);
             }}
             
-            /* 自定义输入框（现在基于QTextEdit） */
-            QTextEdit#modernLineEdit {{
-                background: rgba(255, 255, 255, 0.9);
-                border: 1px solid rgba(255, 255, 255, 0.3);
-                border-radius: {self.scaled(6)}px;
-                padding: {self.scaled(8)}px;
-                font-size: {font_size_base}px;
-                color: #333;
-            }}
-            
-            QTextEdit#modernLineEdit:focus {{
-                border: 1px solid rgba(255, 255, 255, 0.8);
-                background: rgba(255, 255, 255, 1.0);
-            }}
-            
-            QTextEdit#modernLineEdit:disabled {{
+            /* 自定义输入框（多行文本编辑器） */
+            QTextEdit#modernTextEdit:disabled {{
                 background: rgba(255, 255, 255, 0.3);
                 color: rgba(255, 255, 255, 0.5);
+                border: 2px solid rgba(255, 255, 255, 0.2);
             }}
             
             /* 按钮区域 */
@@ -915,19 +1131,38 @@ class ModernQuestionDialog(QWidget):
         
     def on_custom_toggled(self, checked):
         """处理自定义选项切换"""
-        self.custom_input.setEnabled(checked)
-        if checked:
-            self.custom_input.setFocus()
-        else:
-            self.custom_input.clear()
+        try:
+            self.custom_input.setEnabled(checked)
+            if checked:
+                self.custom_input.setFocus()
+                # 当启用"其他"选项时，重新调整对话框大小以适应内容
+                QTimer.singleShot(100, self.adjust_size_to_content)
+            else:
+                # 暂时断开信号连接，避免循环触发
+                self.custom_input.textChanged.disconnect()
+                self.custom_input.clear()
+                # 重新连接信号
+                self.custom_input.textChanged.connect(self.on_custom_changed)
+                # 清空后也重新调整大小
+                QTimer.singleShot(100, self.adjust_size_to_content)
+        except Exception as e:
+            print(f"处理自定义选项切换时出错: {e}")
             
-    def on_custom_changed(self, text):
+    def on_custom_changed(self):
         """处理自定义输入变化"""
-        if text.strip():
-            # 如果有自定义文本，自动选择"其他"选项
-            other_button = self.choice_group.button(len(self.question.options))
-            if other_button and not other_button.isChecked():
-                other_button.setChecked(True)
+        try:
+            text = self.custom_input.toPlainText().strip()
+            if text:
+                # 如果有自定义文本，自动选择"其他"选项
+                other_button = self.choice_group.button(len(self.question.options))
+                if other_button and not other_button.isChecked():
+                    # 暂时断开切换信号，避免循环触发
+                    other_button.toggled.disconnect()
+                    other_button.setChecked(True)
+                    # 重新连接信号
+                    other_button.toggled.connect(self.on_custom_toggled)
+        except Exception as e:
+            print(f"处理自定义输入变化时出错: {e}")
     
     def show_error(self, message, duration=3000):
         """显示错误信息"""
